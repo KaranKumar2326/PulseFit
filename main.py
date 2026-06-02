@@ -2,6 +2,15 @@ import sys
 import os
 import time
 
+# Ensure current working directory is set to the application directory
+# (supporting PyInstaller bundles as well as raw development execution)
+if hasattr(sys, '_MEIPASS'):
+    os.chdir(sys._MEIPASS)
+else:
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    if project_dir:
+        os.chdir(project_dir)
+
 def check_dependencies():
     """Validates that pygame can be loaded, showing an instruction guide if it fails."""
     try:

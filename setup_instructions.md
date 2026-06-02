@@ -16,7 +16,15 @@ PulseFit Arena is an AI-powered rhythm fitness game where players perform squats
 
 ## 🛠️ Step-by-Step Installation
 
-### 1. Set Up Your Python Environment
+### 📦 Windows Executable (No Python Required — Recommended)
+For users who want to play immediately without setting up Python, OpenCV, or MediaPipe:
+1. Locate or download `dist/PulseFitArena.zip`.
+2. Extract the `.zip` archive.
+3. Open the extracted folder and double-click **`PulseFitArena.exe`** to start playing! It is pre-bundled with all assets (audio files, sound effects, and MediaPipe TFLite pose models) and points directly to the live production lobby server at `wss://pulsefit-i8mb.onrender.com`.
+
+### 🐍 Set Up via Python (Developers / Cross-Platform)
+If you prefer running from source:
+1. Set Up Your Python Environment
 PulseFit Arena is built for modern systems. If your default environment runs the highly experimental **Python 3.14**, standard pip wheels for legacy `pygame` might not exist. 
 
 To solve this, we utilize **Pygame Community Edition (`pygame-ce`)**, which is a high-performance modern fork with active support for Python 3.14.
