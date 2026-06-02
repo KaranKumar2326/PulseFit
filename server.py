@@ -3,6 +3,49 @@ import json
 import random
 import string
 import websockets
+import http
+
+# --- MONKEYPATCH FOR RENDER HEALTH CHECKS (HEAD / GET) ---
+import websockets.http11
+from websockets.http11 import Request, parse_line, parse_headers, d
+from websockets.datastructures import Headers
+from websockets.http11 import Response
+
+@classmethod
+def custom_parse(cls, read_line):
+    try:
+        request_line = yield from parse_line(read_line)
+    except EOFError as exc:
+        raise EOFError("connection closed while reading HTTP request line") from exc
+
+    try:
+        method, raw_path, protocol = request_line.split(b" ", 2)
+    except ValueError:
+        raise ValueError(f"invalid HTTP request line: {d(request_line)}") from None
+        
+    if protocol != b"HTTP/1.1":
+        raise ValueError(f"unsupported protocol; expected HTTP/1.1: {d(request_line)}")
+        
+    # Allow both GET and HEAD
+    if method not in (b"GET", b"HEAD"):
+        raise ValueError(f"unsupported HTTP method; expected GET; got {d(method)}")
+        
+    path = raw_path.decode("ascii", "surrogateescape")
+    headers = yield from parse_headers(read_line)
+
+    if "Transfer-Encoding" in headers:
+        raise NotImplementedError("transfer codings aren't supported")
+
+    if "Content-Length" in headers:
+        if int(headers["Content-Length"]) != 0:
+            raise ValueError("unsupported request body")
+
+    req = cls(path, headers)
+    req.method = method.decode("ascii") # Store method
+    return req
+
+# Apply the monkeypatch
+websockets.http11.Request.parse = custom_parse
 
 # Persistent room database
 # Each entry: { "code": { "host": websocket, "guest": websocket, "song": dict, "p1_ready": bool, "p2_ready": bool } }
@@ -156,10 +199,28 @@ async def handle_connection(websocket, path=None):
                         "action": "OPPONENT_DISCONNECTED"
                     }))
 
+def process_request(connection, request):
+    """Handles HTTP health checks from Render's load balancer."""
+    path = request.path
+    method = getattr(request, 'method', 'GET')
+    
+    if path == "/":
+        headers = Headers()
+        headers['Content-Type'] = 'text/plain'
+        
+        body = b"PulseFit Arena Server Live"
+        headers['Content-Length'] = str(len(body))
+        
+        if method == "HEAD":
+            return Response(200, "OK", headers, b"")
+        return Response(200, "OK", headers, body)
+        
+    return None # Fallback to normal websocket upgrade
+
 async def main():
     # Run on local address and public ports
     port = 8765
-    async with websockets.serve(handle_connection, "0.0.0.0", port):
+    async with websockets.serve(handle_connection, "0.0.0.0", port, process_request=process_request):
         print(f"[Server] PulseFit Arena Room Coordinator running on ws://localhost:{port} ...")
         await asyncio.Future() # run forever
 
