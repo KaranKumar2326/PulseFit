@@ -204,7 +204,10 @@ def process_request(connection, request):
     path = request.path
     method = getattr(request, 'method', 'GET')
     
-    if path == "/":
+    # Check if this is a WebSocket upgrade request
+    is_websocket = "Upgrade" in request.headers and request.headers.get("Upgrade", "").lower() == "websocket"
+    
+    if path == "/" and not is_websocket:
         headers = Headers()
         headers['Content-Type'] = 'text/plain'
         
