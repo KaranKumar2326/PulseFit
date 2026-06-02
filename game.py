@@ -362,7 +362,7 @@ class PulseFitGame:
             
             # Start asynchronous background client!
             # (Checks ws://localhost:8765. In production, this can point to a remote server)
-            self.net_client = NetworkClient(server_url="ws://localhost:8765")
+            self.net_client = NetworkClient(server_url="wss://pulsefit-i8mb.onrender.com")
             if not self.net_client.connect():
                 self.net_error = "WEBSOCKET LIBRARY ERROR"
                 self.net_client = None
