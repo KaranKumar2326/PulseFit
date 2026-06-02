@@ -27,8 +27,8 @@ Run the following command to install the compatible packages:
 # 1. Install compatible high-performance dependencies
 pip install pygame-ce opencv-python mediapipe numpy
 
-# Or using the standard requirements file:
-pip install -r requirements.txt
+# Or using the standard client requirements file:
+pip install -r requirements_client.txt
 ```
 
 *(Note: If you encounter compiler errors on Python 3.14, installing `pygame-ce` instead of standard `pygame` will resolve it instantly.)*

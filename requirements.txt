@@ -1,7 +1,1 @@
-pygame>=2.5.0
-opencv-python>=4.8.0
-mediapipe>=0.10.0
-librosa>=0.10.0
-numpy>=1.22.0
-websocket-client>=1.6.0
 websockets>=11.0
