@@ -75,9 +75,10 @@ graph TD
 ## Windows Standalone Executable (No Python Required)
 
 For players who want to run the game directly:
-1. Download and extract `dist/PulseFitArena.zip` (about 115 MB).
-2. Open the folder and double-click `PulseFitArena.exe`.
-3. The executable is pre-bundled with all assets (audio files, sound effects, and pose models) and connects to the live online lobby.
+1. Download the pre-compiled package: **[Download PulseFitArena.zip](https://github.com/KaranKumar2326/PulseFit/releases/download/v1.0.0/PulseFitArena.zip)** (about 115 MB).
+2. Extract the downloaded ZIP archive.
+3. Open the folder and double-click `PulseFitArena.exe`.
+4. The executable is pre-bundled with all assets (audio files, sound effects, and pose models) and connects to the live online lobby.
 
 ---
 
