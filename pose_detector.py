@@ -70,6 +70,9 @@ class PoseDetector:
         self.knee_angle = 180.0
         self.back_angle = 0.0
         self.hip_symmetry = 0.0
+        self.l_elbow_angle = 180.0
+        self.r_elbow_angle = 180.0
+        self.active_exercise = "SQUATS" # SQUATS, JUMPING_JACKS, CYBER_PUNCHES
         
         # In-Frame Joint Visibility Tracking (Calibration)
         self.shoulders_in_frame = False
@@ -85,6 +88,18 @@ class PoseDetector:
         self.is_squat_just_completed = False
         self.squat_feedback = "STAND BY"
         self.back_warning_count = 0
+        
+        # State Machine for Jumping Jacks
+        self.jumping_jack_state = "CLOSED"
+        self.jumping_jack_count = 0
+        self.is_jumping_jack_just_completed = False
+        
+        # State Machine for Cyber Punches
+        self.left_punch_state = "RETRACTED"
+        self.right_punch_state = "RETRACTED"
+        self.punch_count = 0
+        self.is_punch_just_completed = False
+        self.last_punch_hand = None
         
         # EMA Smoothing filter
         self.alpha_smooth = 0.35
@@ -302,31 +317,32 @@ class PoseDetector:
         l_knee, r_knee = lm[25], lm[26]
         l_ankle, r_ankle = lm[27], lm[28]
         l_shldr, r_shldr = lm[11], lm[12]
+        l_wrst, r_wrst = lm[15], lm[16]
+        l_elbw, r_elbw = lm[13], lm[14]
         
         # --- CALIBRATION VISIBILITY CHECKS ---
-        # A joint is declared visible if its visibility confidence > 0.65
         self.shoulders_in_frame = (l_shldr.visibility > 0.65 and r_shldr.visibility > 0.65)
         self.hips_in_frame = (l_hp.visibility > 0.65 and r_hp.visibility > 0.65)
         self.knees_in_frame = (l_knee.visibility > 0.65 and r_knee.visibility > 0.65)
         self.ankles_in_frame = (l_ankle.visibility > 0.65 and r_ankle.visibility > 0.65)
+        self.wrists_in_frame = (l_wrst.visibility > 0.65 and r_wrst.visibility > 0.65)
+        self.elbows_in_frame = (l_elbw.visibility > 0.65 and r_elbw.visibility > 0.65)
         
-        # Full body presence is required for accurate trigonometrical angle calculations!
-        self.body_in_frame = (self.shoulders_in_frame and self.hips_in_frame and 
-                              self.knees_in_frame and self.ankles_in_frame)
+        # Determine presence based on requirements of chosen exercise
+        if self.active_exercise == "SQUATS":
+            self.body_in_frame = (self.shoulders_in_frame and self.hips_in_frame and 
+                                  self.knees_in_frame and self.ankles_in_frame)
+        elif self.active_exercise == "JUMPING_JACKS":
+            self.body_in_frame = (self.shoulders_in_frame and self.hips_in_frame and 
+                                  self.knees_in_frame and self.ankles_in_frame and self.wrists_in_frame)
+        elif self.active_exercise == "CYBER_PUNCHES":
+            self.body_in_frame = (self.shoulders_in_frame and self.elbows_in_frame and self.wrists_in_frame)
         
         if not self.body_in_frame:
             self.squat_feedback = "KEEP BODY IN FRAME"
-            # We don't perform calculations on erratic out-of-frame guesswork landmarks
             return
             
-        # 1. Calculate knee angles
-        l_angle = self._calculate_angle(l_hip, l_knee, l_ankle)
-        r_angle = self._calculate_angle(r_hip, r_knee, r_ankle)
-        
-        raw_knee_angle = (l_angle + r_angle) / 2.0
-        self.knee_angle = (self.alpha_smooth * raw_knee_angle) + ((1 - self.alpha_smooth) * self.knee_angle)
-        
-        # 2. Back tilt
+        # Common biomechanic calculations
         mid_shldr_x = (l_shldr.x + r_shldr.x) / 2.0
         mid_shldr_y = (l_shldr.y + r_shldr.y) / 2.0
         mid_hip_x = (l_hp.x + r_hp.x) / 2.0
@@ -338,48 +354,133 @@ class PoseDetector:
         raw_back_angle = math.degrees(math.atan2(abs(dx), abs(dy)))
         self.back_angle = (self.alpha_smooth * raw_back_angle) + ((1 - self.alpha_smooth) * self.back_angle)
         
-        # 3. Hip Symmetry
         dy_hip = abs(l_hp.y - r_hp.y)
         self.hip_symmetry = (self.alpha_smooth * dy_hip) + ((1 - self.alpha_smooth) * self.hip_symmetry)
-        
-        # --- SQUAT STATE MACHINE ---
-        if self.squat_state == "STANDING":
-            self.squat_feedback = "STANDING"
-            if self.knee_angle < 125.0:
-                self.squat_state = "SQUATTING"
-                self.max_squat_depth = self.knee_angle
-                self.is_squat_just_completed = False
-                
-        elif self.squat_state == "SQUATTING":
-            self.squat_feedback = "SQUATTING"
-            if self.knee_angle < self.max_squat_depth:
-                self.max_squat_depth = self.knee_angle
-                
-            if self.back_angle > 28.0:
-                self.squat_feedback = "STRAIGHTEN BACK"
-                self.back_warning_count += 1
-            elif self.knee_angle < 98.0:
-                self.squat_feedback = "DEEP SQUAT"
-            else:
-                self.squat_feedback = "FORM GOOD"
-                
-            if self.knee_angle > 155.0:
-                self.squat_state = "STANDING"
-                self.squat_count += 1
-                self.is_squat_just_completed = True
+
+        # --- EXERCISE SPECIFIC LOGIC ---
+        if self.active_exercise == "SQUATS":
+            l_angle = self._calculate_angle(l_hip, l_knee, l_ankle)
+            r_angle = self._calculate_angle(r_hip, r_knee, r_ankle)
+            raw_knee_angle = (l_angle + r_angle) / 2.0
+            self.knee_angle = (self.alpha_smooth * raw_knee_angle) + ((1 - self.alpha_smooth) * self.knee_angle)
+            
+            if self.squat_state == "STANDING":
+                self.squat_feedback = "STANDING"
+                if self.knee_angle < 125.0:
+                    self.squat_state = "SQUATTING"
+                    self.max_squat_depth = self.knee_angle
+                    self.is_squat_just_completed = False
+                    
+            elif self.squat_state == "SQUATTING":
+                self.squat_feedback = "SQUATTING"
+                if self.knee_angle < self.max_squat_depth:
+                    self.max_squat_depth = self.knee_angle
+                    
+                if self.back_angle > 28.0:
+                    self.squat_feedback = "STRAIGHTEN BACK"
+                    self.back_warning_count += 1
+                elif self.knee_angle < 98.0:
+                    self.squat_feedback = "DEEP SQUAT"
+                else:
+                    self.squat_feedback = "FORM GOOD"
+                    
+                if self.knee_angle > 155.0:
+                    self.squat_state = "STANDING"
+                    self.squat_count += 1
+                    self.is_squat_just_completed = True
+
+        elif self.active_exercise == "JUMPING_JACKS":
+            # Wrist Y is lower than shoulder Y for raised hands (coordinate increases downward)
+            hands_up = (l_wrst.y < l_shldr.y and r_wrst.y < r_shldr.y)
+            
+            # Ankle separation vs. shoulder separation
+            sh_width = abs(l_shldr.x - r_shldr.x)
+            ankle_width = abs(l_ankle.x - r_ankle.x)
+            feet_ratio = ankle_width / max(0.01, sh_width)
+            feet_spread = (feet_ratio > 1.35)
+            
+            if self.jumping_jack_state == "CLOSED":
+                self.squat_feedback = "OPEN HANDS & FEET"
+                if hands_up and feet_spread:
+                    self.jumping_jack_state = "OPEN"
+                    self.is_jumping_jack_just_completed = False
+            elif self.jumping_jack_state == "OPEN":
+                self.squat_feedback = "CLOSE HANDS & FEET"
+                hands_down = (l_wrst.y > l_shldr.y and r_wrst.y > r_shldr.y)
+                feet_closed = (feet_ratio < 1.15)
+                if hands_down and feet_closed:
+                    self.jumping_jack_state = "CLOSED"
+                    self.jumping_jack_count += 1
+                    self.is_jumping_jack_just_completed = True
+                    self.squat_feedback = "PERFECT JACK"
+
+        elif self.active_exercise == "CYBER_PUNCHES":
+            l_el_angle = self._calculate_angle(l_shldr, l_elbw, l_wrst)
+            r_el_angle = self._calculate_angle(r_shldr, r_elbw, r_wrst)
+            
+            self.l_elbow_angle = (self.alpha_smooth * l_el_angle) + ((1 - self.alpha_smooth) * self.l_elbow_angle)
+            self.r_elbow_angle = (self.alpha_smooth * r_el_angle) + ((1 - self.alpha_smooth) * self.r_elbow_angle)
+            
+            self.is_punch_just_completed = False
+            
+            # Left punch check
+            if self.left_punch_state == "RETRACTED":
+                if self.l_elbow_angle > 155.0:
+                    self.left_punch_state = "EXTENDED"
+                    self.punch_count += 1
+                    self.is_punch_just_completed = True
+                    self.last_punch_hand = "LEFT"
+                    self.squat_feedback = "LEFT PUNCH"
+            elif self.left_punch_state == "EXTENDED":
+                if self.l_elbow_angle < 115.0:
+                    self.left_punch_state = "RETRACTED"
+                    
+            # Right punch check
+            if self.right_punch_state == "RETRACTED":
+                if self.r_elbow_angle > 155.0:
+                    self.right_punch_state = "EXTENDED"
+                    self.punch_count += 1
+                    self.is_punch_just_completed = True
+                    self.last_punch_hand = "RIGHT"
+                    self.squat_feedback = "RIGHT PUNCH"
+            elif self.right_punch_state == "EXTENDED":
+                if self.r_elbow_angle < 115.0:
+                    self.right_punch_state = "RETRACTED"
+
+            if not self.is_punch_just_completed:
+                self.squat_feedback = "GUARD UP"
 
     def get_and_clear_squat_event(self):
-        """Returns True if a squat was completed since last call, and resets the flag."""
-        val = self.is_squat_just_completed
-        self.is_squat_just_completed = False
-        return val
+        """Returns True if a rep of the active exercise was completed since last call."""
+        if self.active_exercise == "JUMPING_JACKS":
+            val = self.is_jumping_jack_just_completed
+            self.is_jumping_jack_just_completed = False
+            return val
+        elif self.active_exercise == "CYBER_PUNCHES":
+            val = self.is_punch_just_completed
+            self.is_punch_just_completed = False
+            return val
+        else:
+            val = self.is_squat_just_completed
+            self.is_squat_just_completed = False
+            return val
 
     def simulate_key_squat(self, depth=95.0):
-        """Simulates a squat event for mock mode (e.g. keyboard triggers)."""
-        self.max_squat_depth = depth
-        self.squat_count += 1
-        self.is_squat_just_completed = True
-        self.squat_feedback = "PERFECT FORM" if depth < 105.0 else "GO LOWER"
+        """Simulates a rep event for mock mode (e.g. keyboard triggers)."""
+        if self.active_exercise == "JUMPING_JACKS":
+            self.jumping_jack_count += 1
+            self.is_jumping_jack_just_completed = True
+            self.squat_feedback = "PERFECT JACK"
+        elif self.active_exercise == "CYBER_PUNCHES":
+            self.punch_count += 1
+            self.is_punch_just_completed = True
+            self.last_punch_hand = "RIGHT" if self.last_punch_hand == "LEFT" else "LEFT"
+            self.squat_feedback = f"{self.last_punch_hand} PUNCH"
+        else:
+            self.max_squat_depth = depth
+            self.squat_count += 1
+            self.is_squat_just_completed = True
+            self.squat_feedback = "PERFECT FORM" if depth < 105.0 else "GO LOWER"
 
     def _draw_neon_skeleton(self, img, lm):
         """Draws a beautiful neon skeleton overlay on the webcam feed."""
@@ -392,26 +493,41 @@ class PoseDetector:
         l_hp, r_hp = to_pix(lm[23]), to_pix(lm[24])
         l_kn, r_kn = to_pix(lm[25]), to_pix(lm[26])
         l_ak, r_ak = to_pix(lm[27]), to_pix(lm[28])
+        l_el, r_el = to_pix(lm[13]), to_pix(lm[14])
+        l_wr, r_wr = to_pix(lm[15]), to_pix(lm[16])
         
-        form_color = (30, 30, 255) if self.back_angle > 28.0 else (0, 240, 255)
+        # Color state logic
+        form_color = (30, 30, 255) if (self.active_exercise == "SQUATS" and self.back_angle > 28.0) else (0, 240, 255)
         secondary_color = (189, 0, 255)
         
-        # Joints lines
+        # Draw torso box
         cv2.line(img, l_sh, r_sh, form_color, 4)
         cv2.line(img, l_hp, r_hp, form_color, 4)
+        cv2.line(img, l_sh, l_hp, form_color, 4)
+        cv2.line(img, r_sh, r_hp, form_color, 4)
         
-        # Left Leg
+        # Draw Left Arm
+        cv2.line(img, l_sh, l_el, secondary_color, 4)
+        cv2.line(img, l_el, l_wr, secondary_color, 4)
+        
+        # Draw Right Arm
+        cv2.line(img, r_sh, r_el, secondary_color, 4)
+        cv2.line(img, r_el, r_wr, secondary_color, 4)
+        
+        # Draw Left Leg
         cv2.line(img, l_hp, l_kn, secondary_color, 4)
         cv2.line(img, l_kn, l_ak, secondary_color, 4)
         
-        # Right Leg
+        # Draw Right Leg
         cv2.line(img, r_hp, r_kn, secondary_color, 4)
         cv2.line(img, r_kn, r_ak, secondary_color, 4)
         
-        # Nodes
-        for idx, node in enumerate([l_sh, r_sh, l_hp, r_hp, l_kn, r_kn, l_ak, r_ak]):
-            cv2.circle(img, node, 8, (255, 255, 255), -1)
-            cv2.circle(img, node, 13, form_color, 2)
+        # Draw joints (nodes)
+        joints = [l_sh, r_sh, l_hp, r_hp, l_kn, r_kn, l_ak, r_ak, l_el, r_el, l_wr, r_wr]
+        for node in joints:
+            cv2.circle(img, node, 6, (255, 255, 255), -1)
+            cv2.circle(img, node, 10, form_color, 2)
+
 
     def get_latest_frame(self):
         """Safely returns the latest frame and annotated frame."""

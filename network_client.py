@@ -180,11 +180,11 @@ class NetworkClient:
         """Requests to join an existing alphanumeric Room Code match."""
         return self._send_payload({"action": "JOIN", "code": code.upper()})
 
-    def send_select_song(self, song_name, song_file, bpm, diff):
+    def send_select_song(self, song_name, song_file, bpm, diff, exercise="SQUATS"):
         """Synchronizes host song selection with the guest client."""
         return self._send_payload({
             "action": "SELECT_SONG",
-            "song": {"name": song_name, "file": song_file, "bpm": bpm, "diff": diff}
+            "song": {"name": song_name, "file": song_file, "bpm": bpm, "diff": diff, "exercise": exercise}
         })
 
     def send_calibration(self, shoulders, hips, knees, ankles, body_in_frame):

@@ -79,6 +79,15 @@ class PulseFitGame:
         ]
         self.selected_song_idx = 0
         
+        # Selected exercise metadata
+        self.exercises_list = [
+            {"name": "SQUATS", "desc": "Triggers on deep knee bend. Focus on a straight back."},
+            {"name": "JUMPING JACKS", "desc": "Hands above head, feet open wide. High cardio tempo."},
+            {"name": "CYBER PUNCHES", "desc": "Alternate rapid left and right arm punches. Fast reflex test."}
+        ]
+        self.selected_exercise_idx = 0
+        self.active_exercise = "SQUATS"
+        
         # Game State Objects
         self.p1_detector = None
         self.p2_detector = None
@@ -176,25 +185,27 @@ class PulseFitGame:
         
         # Set up Player 1 systems
         self.p1_detector = PoseDetector(player_idx=0, camera_src=0)
+        self.p1_detector.active_exercise = self.active_exercise
         self.rhythm_engine_p1 = RhythmEngine(self.difficulty)
         self.rhythm_engine_p1.load_song(song_path, bpm)
         self.score_p1 = ScoringSystem()
-        self.coach_p1 = AICoach()
+        self.coach_p1 = AICoach(self.active_exercise)
         
         if self.game_mode == "ONLINE":
             # For online mode, Player 2 is remote, so we only launch P1's physical camera
             self.p1_detector.start()
             # Opponent scores are updated asynchronously via network telemetry relayer
             self.score_p2 = ScoringSystem()
-            self.coach_p2 = AICoach()
+            self.coach_p2 = AICoach(self.active_exercise)
             
         elif self.game_mode == "MULTIPLAYER":
             # Split-screen cooperative mode
             self.p2_detector = PoseDetector(player_idx=1, camera_src=0)
+            self.p2_detector.active_exercise = self.active_exercise
             self.rhythm_engine_p2 = RhythmEngine(self.difficulty)
             self.rhythm_engine_p2.load_song(song_path, bpm)
             self.score_p2 = ScoringSystem()
-            self.coach_p2 = AICoach()
+            self.coach_p2 = AICoach(self.active_exercise)
             
             self.multiplayer_mgr = MultiplayerManager(self.p1_detector, self.p2_detector, camera_src=0)
             self.multiplayer_mgr.start()
@@ -267,7 +278,7 @@ class PulseFitGame:
                         self.cleanup_gameplay()
                         self.state = "MENU"
                         self.play_sound(self.sfx_click)
-                    elif self.state in ["SONG_SELECT", "RESULTS", "LEADERBOARD"]:
+                    elif self.state in ["SONG_SELECT", "EXERCISE_SELECT", "RESULTS", "LEADERBOARD"]:
                         self.state = "MENU"
                         self.play_sound(self.sfx_click)
                         
@@ -282,6 +293,19 @@ class PulseFitGame:
                     elif event.key in [pygame.K_RETURN, pygame.K_SPACE]:
                         self.play_sound(self.sfx_click)
                         self._trigger_menu_action()
+                        
+                elif self.state == "EXERCISE_SELECT":
+                    if event.key in [pygame.K_UP, pygame.K_w]:
+                        self.selected_exercise_idx = (self.selected_exercise_idx - 1) % len(self.exercises_list)
+                        self.play_sound(self.sfx_click)
+                    elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                        self.selected_exercise_idx = (self.selected_exercise_idx + 1) % len(self.exercises_list)
+                        self.play_sound(self.sfx_click)
+                    elif event.key in [pygame.K_RETURN, pygame.K_SPACE]:
+                        self.play_sound(self.sfx_click)
+                        selected = self.exercises_list[self.selected_exercise_idx]["name"]
+                        self.active_exercise = selected.replace(" ", "_")
+                        self.state = "SONG_SELECT"
                         
                 elif self.state == "SONG_SELECT":
                     if event.key in [pygame.K_UP, pygame.K_w]:
@@ -299,7 +323,7 @@ class PulseFitGame:
                             # Host selects the song: send it over WebSockets
                             if self.net_client and self.net_client.role == "HOST":
                                 self.net_client.send_select_song(
-                                    song["name"], song["file"], song["bpm"], song["diff"]
+                                    song["name"], song["file"], song["bpm"], song["diff"], self.active_exercise
                                 )
                                 self.state = "ONLINE_CALIBRATION"
                                 self.start_song(song["file"], song["bpm"])
@@ -349,10 +373,10 @@ class PulseFitGame:
         action = self.menu_buttons[self.selected_button_idx]["action"]
         if action == "SOLO":
             self.game_mode = "SOLO"
-            self.state = "SONG_SELECT"
+            self.state = "EXERCISE_SELECT"
         elif action == "BATTLE":
             self.game_mode = "MULTIPLAYER"
-            self.state = "SONG_SELECT"
+            self.state = "EXERCISE_SELECT"
         elif action == "ONLINE":
             # Spin up online multiplayer client socket
             self.game_mode = "ONLINE"
@@ -520,11 +544,17 @@ class PulseFitGame:
                 self.trigger_popup("MISS", self.width - 250 if self.game_mode == "SOLO" else self.width // 4 + 80, strike_y - 20, PINK)
                 
         if self.p1_detector.get_and_clear_squat_event():
-            depth = self.p1_detector.max_squat_depth
-            back = self.p1_detector.back_angle
-            self.depth_history_p1.append(depth)
-            
-            fb_msg, form_score = self.coach_p1.evaluate_squat(depth, back)
+            if self.active_exercise == "SQUATS":
+                depth = self.p1_detector.max_squat_depth
+                back = self.p1_detector.back_angle
+                self.depth_history_p1.append(depth)
+                fb_msg, form_score = self.coach_p1.evaluate_squat(depth, back)
+            elif self.active_exercise == "JUMPING_JACKS":
+                self.depth_history_p1.append(100.0)
+                fb_msg, form_score = self.coach_p1.evaluate_jumping_jack()
+            else:
+                self.depth_history_p1.append(100.0)
+                fb_msg, form_score = self.coach_p1.evaluate_punch()
             rating, points, time_diff = self.rhythm_engine_p1.check_hit(self.current_song_time)
             
             if rating:
@@ -554,11 +584,17 @@ class PulseFitGame:
                     self.trigger_popup("MISS", (self.width // 4) * 3 + 80, strike_y - 20, PINK)
                     
             if self.p2_detector.get_and_clear_squat_event():
-                depth = self.p2_detector.max_squat_depth
-                back = self.p2_detector.back_angle
-                self.depth_history_p2.append(depth)
-                
-                fb_msg, form_score = self.coach_p2.evaluate_squat(depth, back)
+                if self.active_exercise == "SQUATS":
+                    depth = self.p2_detector.max_squat_depth
+                    back = self.p2_detector.back_angle
+                    self.depth_history_p2.append(depth)
+                    fb_msg, form_score = self.coach_p2.evaluate_squat(depth, back)
+                elif self.active_exercise == "JUMPING_JACKS":
+                    self.depth_history_p2.append(100.0)
+                    fb_msg, form_score = self.coach_p2.evaluate_jumping_jack()
+                else:
+                    self.depth_history_p2.append(100.0)
+                    fb_msg, form_score = self.coach_p2.evaluate_punch()
                 rating, points, time_diff = self.rhythm_engine_p2.check_hit(self.current_song_time)
                 
                 if rating:
@@ -606,18 +642,19 @@ class PulseFitGame:
         with self.net_client.lock:
             role = self.net_client.role
             
-            # Host: If opponent has successfully connected, transition to Song Selection!
+            # Host: If opponent has successfully connected, transition to Exercise Selection!
             if role == "HOST" and self.net_client.opponent_connected:
-                self.state = "SONG_SELECT"
+                self.state = "EXERCISE_SELECT"
                 self.play_sound(self.sfx_perfect)
                 
-            # Guest: Wait for Host's song selection package, then auto-load track
+            # Guest: Wait for Host's song selection package, then auto-load track and exercise
             if role == "GUEST" and self.net_client.selected_song:
                 song = self.net_client.selected_song
                 self.difficulty = song["diff"]
                 self.selected_song_idx = next(
                     (i for i, s in enumerate(self.songs_list) if s["file"] == song["file"]), 0
                 )
+                self.active_exercise = song.get("exercise", "SQUATS")
                 # Clear selected buffer
                 self.net_client.selected_song = None
                 
@@ -755,11 +792,17 @@ class PulseFitGame:
                 
         # Squat triggers P1
         if self.p1_detector.get_and_clear_squat_event():
-            depth = self.p1_detector.max_squat_depth
-            back = self.p1_detector.back_angle
-            self.depth_history_p1.append(depth)
-            
-            fb_msg, form_score = self.coach_p1.evaluate_squat(depth, back)
+            if self.active_exercise == "SQUATS":
+                depth = self.p1_detector.max_squat_depth
+                back = self.p1_detector.back_angle
+                self.depth_history_p1.append(depth)
+                fb_msg, form_score = self.coach_p1.evaluate_squat(depth, back)
+            elif self.active_exercise == "JUMPING_JACKS":
+                self.depth_history_p1.append(100.0)
+                fb_msg, form_score = self.coach_p1.evaluate_jumping_jack()
+            else:
+                self.depth_history_p1.append(100.0)
+                fb_msg, form_score = self.coach_p1.evaluate_punch()
             rating, points, time_diff = self.rhythm_engine_p1.check_hit(self.current_song_time)
             
             if rating:
@@ -807,6 +850,8 @@ class PulseFitGame:
         
         if self.state == "MENU":
             self._draw_menu(canvas)
+        elif self.state == "EXERCISE_SELECT":
+            self._draw_exercise_select(canvas)
         elif self.state == "SONG_SELECT":
             self._draw_song_select(canvas)
         elif self.state == "CALIBRATION":
@@ -927,6 +972,123 @@ class PulseFitGame:
             draw_neon_rect(surface, btn_rect, border_col, width=2, border_radius=8, glow_radius=glow_rad)
             draw_neon_text(surface, btn["label"], self.font_hud, (draw_x, btn_rect.centery), text_col, 2 if is_selected else 0)
             
+        # Draw arcade instructions at the bottom
+        lbl_inst = self.font_small.render("USE [UP / DOWN] TO NAVIGATE — PRESS [ENTER / SPACE] TO SELECT", True, GRAY)
+        surface.blit(lbl_inst, (cx - lbl_inst.get_width() // 2, self.height - 50))
+
+    def _draw_exercise_select(self, surface):
+        """Draws high-tech exercise selection list and profile analytics card."""
+        cx = self.width // 2
+        draw_neon_text(surface, "SELECT SYSTEM WORKOUT", self.font_title, (cx, 80), PURPLE, 4)
+        
+        # Left Panel: Exercise List
+        list_x = 80
+        list_y = 170
+        list_w = 520
+        list_h = 440
+        
+        list_rect = pygame.Rect(list_x, list_y, list_w, list_h)
+        pygame.draw.rect(surface, (12, 12, 28), list_rect, border_radius=12)
+        draw_neon_rect(surface, list_rect, PURPLE, 2, border_radius=12, glow_radius=3)
+        
+        dy = 110
+        for idx, ex in enumerate(self.exercises_list):
+            ex_rect = pygame.Rect(list_x + 20, list_y + 20 + idx * dy, list_w - 40, 90)
+            is_selected = (idx == self.selected_exercise_idx)
+            
+            bg_col = (20, 30, 50) if is_selected else (15, 15, 25)
+            pygame.draw.rect(surface, bg_col, ex_rect, border_radius=10)
+            
+            border_col = CYAN if is_selected else DARK_GRAY
+            glow_rad = 5 if is_selected else 0
+            
+            draw_neon_rect(surface, ex_rect, border_col, width=2, border_radius=10, glow_radius=glow_rad)
+            
+            # Text alignment
+            text_x = ex_rect.x + 30
+            text_y = ex_rect.centery - 15
+            
+            lbl_title = self.font_header.render(ex["name"], True, WHITE if is_selected else GRAY)
+            surface.blit(lbl_title, (text_x, text_y))
+            
+            lbl_bpm = self.font_small.render("GESTURE SYSTEM: MediaPipe AI Pose Tracking", True, CYAN if is_selected else GRAY)
+            surface.blit(lbl_bpm, (text_x, text_y + 35))
+            
+        # Right Panel: Exercise Analysis card
+        card_x = 650
+        card_y = 170
+        card_w = 550
+        card_h = 440
+        
+        card_rect = pygame.Rect(card_x, card_y, card_w, card_h)
+        pygame.draw.rect(surface, (12, 12, 28), card_rect, border_radius=12)
+        draw_neon_rect(surface, card_rect, CYAN, 2, border_radius=12, glow_radius=3)
+        
+        # Analyze current selected exercise
+        sel_ex = self.exercises_list[self.selected_exercise_idx]
+        
+        draw_neon_text(surface, "WORKOUT PROFILE LOGS", self.font_header, (card_rect.centerx, card_rect.y + 40), WHITE, 1)
+        draw_neon_line(surface, (card_rect.x + 30, card_rect.y + 70), (card_rect.x + card_w - 30, card_rect.y + 70), DARK_GRAY, 1, 1)
+        
+        # Word wrap helper
+        def wrap_text(text, max_w, font):
+            words = text.split(' ')
+            lines = []
+            current_line = []
+            for word in words:
+                test_line = ' '.join(current_line + [word])
+                if font.size(test_line)[0] < max_w:
+                    current_line.append(word)
+                else:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+            if current_line:
+                lines.append(' '.join(current_line))
+            return lines
+            
+        # Drawing details inside card
+        card_text_y = card_rect.y + 100
+        
+        # Draw exercise description
+        desc_wrapped = wrap_text(sel_ex["desc"], card_w - 60, self.font_hud)
+        for line in desc_wrapped:
+            lbl_desc = self.font_hud.render(line, True, WHITE)
+            surface.blit(lbl_desc, (card_rect.x + 30, card_text_y))
+            card_text_y += 30
+            
+        card_text_y += 10
+        
+        # Joint Tracking details
+        lbl_tracker = self.font_header.render("TRACKED JOINTS:", True, PURPLE)
+        surface.blit(lbl_tracker, (card_rect.x + 30, card_text_y))
+        card_text_y += 35
+        
+        if sel_ex["name"] == "SQUATS":
+            joints_text = "Hips, Knees, Ankles, Shoulders (Back Angle)"
+        elif sel_ex["name"] == "JUMPING JACKS":
+            joints_text = "Wrists, Shoulders, Ankles (Hands height & feet spread)"
+        else:
+            joints_text = "Elbows, Shoulders, Wrists (Punch full extension)"
+            
+        lbl_joints = self.font_hud.render(joints_text, True, CYAN)
+        surface.blit(lbl_joints, (card_rect.x + 30, card_text_y))
+        card_text_y += 45
+        
+        # Form Tips
+        lbl_tips = self.font_header.render("TRAINING TIPS:", True, PURPLE)
+        surface.blit(lbl_tips, (card_rect.x + 30, card_text_y))
+        card_text_y += 35
+        
+        if sel_ex["name"] == "SQUATS":
+            tips_text = "Keep chest puffed out. Try to bend knees below 115 degrees."
+        elif sel_ex["name"] == "JUMPING JACKS":
+            tips_text = "Open arms and legs wide on the beat. Coordinate hand raise."
+        else:
+            tips_text = "Punches must be rapid and reach full extension. Keep your guard up."
+            
+        lbl_tip_val = self.font_hud.render(tips_text, True, WHITE)
+        surface.blit(lbl_tip_val, (card_rect.x + 30, card_text_y))
+        
         # Draw arcade instructions at the bottom
         lbl_inst = self.font_small.render("USE [UP / DOWN] TO NAVIGATE — PRESS [ENTER / SPACE] TO SELECT", True, GRAY)
         surface.blit(lbl_inst, (cx - lbl_inst.get_width() // 2, self.height - 50))
