@@ -533,7 +533,8 @@ class PulseFitGame:
             
         # P1 Highway notes
         strike_y = self.height - 120
-        self.rhythm_engine_p1.update(self.current_song_time, strike_y, self.height)
+        track_y = 60 if self.game_mode == "MULTIPLAYER" else 70
+        self.rhythm_engine_p1.update(self.current_song_time, strike_y - track_y, self.height)
         
         for note in self.rhythm_engine_p1.notes:
             if note.missed and not note.hit:
@@ -573,7 +574,8 @@ class PulseFitGame:
 
         # P2 splitscreen updates
         if self.game_mode == "MULTIPLAYER" and self.p2_detector:
-            self.rhythm_engine_p2.update(self.current_song_time, strike_y, self.height)
+            track_y = 60
+            self.rhythm_engine_p2.update(self.current_song_time, strike_y - track_y, self.height)
             
             for note in self.rhythm_engine_p2.notes:
                 if note.missed and not note.hit:
@@ -779,7 +781,8 @@ class PulseFitGame:
             
         # 4. Update local rhythm notes scrolling
         strike_y = self.height - 120
-        self.rhythm_engine_p1.update(self.current_song_time, strike_y, self.height)
+        track_y = 60 # online is always 60
+        self.rhythm_engine_p1.update(self.current_song_time, strike_y - track_y, self.height)
         
         # Check missed notes local
         for note in self.rhythm_engine_p1.notes:
@@ -1629,7 +1632,7 @@ class PulseFitGame:
         track_w = 200
         track_x = start_x + width - track_w - 20
         track_y = 60
-        track_h = self.height - 160
+        track_h = self.height - 90
         
         track_rect = pygame.Rect(track_x, track_y, track_w, track_h)
         pygame.draw.rect(surface, (8, 8, 16), track_rect, border_radius=8)
@@ -1797,7 +1800,7 @@ class PulseFitGame:
         track_w = 400
         track_x = self.width - track_w - 40
         track_y = 70
-        track_h = self.height - 180
+        track_h = self.height - 100
         
         track_rect = pygame.Rect(track_x, track_y, track_w, track_h)
         pygame.draw.rect(surface, (8, 8, 16), track_rect, border_radius=12)
@@ -1900,7 +1903,7 @@ class PulseFitGame:
         track_w = 200
         track_x = start_x + width - track_w - 20
         track_y = 60
-        track_h = self.height - 160
+        track_h = self.height - 90
         
         track_rect = pygame.Rect(track_x, track_y, track_w, track_h)
         pygame.draw.rect(surface, (8, 8, 16), track_rect, border_radius=8)

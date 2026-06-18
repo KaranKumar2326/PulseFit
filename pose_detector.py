@@ -384,10 +384,20 @@ class PoseDetector:
                 else:
                     self.squat_feedback = "FORM GOOD"
                     
-                if self.knee_angle > 155.0:
+                # Trigger hit event immediately when player starts to stand back up
+                if self.knee_angle > self.max_squat_depth + 6.0 and self.max_squat_depth < 120.0:
+                    self.is_squat_just_completed = True
+                    self.squat_state = "RISING"
+                elif self.knee_angle > 155.0:
                     self.squat_state = "STANDING"
                     self.squat_count += 1
                     self.is_squat_just_completed = True
+                    
+            elif self.squat_state == "RISING":
+                self.squat_feedback = "RISING"
+                if self.knee_angle > 155.0:
+                    self.squat_state = "STANDING"
+                    self.squat_count += 1
 
         elif self.active_exercise == "JUMPING_JACKS":
             # Wrist Y is lower than shoulder Y for raised hands (coordinate increases downward)
@@ -403,7 +413,7 @@ class PoseDetector:
                 self.squat_feedback = "OPEN HANDS & FEET"
                 if hands_up and feet_spread:
                     self.jumping_jack_state = "OPEN"
-                    self.is_jumping_jack_just_completed = False
+                    self.is_jumping_jack_just_completed = True # Trigger hit at peak!
             elif self.jumping_jack_state == "OPEN":
                 self.squat_feedback = "CLOSE HANDS & FEET"
                 hands_down = (l_wrst.y > l_shldr.y and r_wrst.y > r_shldr.y)
@@ -411,7 +421,6 @@ class PoseDetector:
                 if hands_down and feet_closed:
                     self.jumping_jack_state = "CLOSED"
                     self.jumping_jack_count += 1
-                    self.is_jumping_jack_just_completed = True
                     self.squat_feedback = "PERFECT JACK"
 
         elif self.active_exercise == "CYBER_PUNCHES":
